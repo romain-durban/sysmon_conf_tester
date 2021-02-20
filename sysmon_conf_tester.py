@@ -1,33 +1,34 @@
 import sys, os, re, json, logging
 import xml.etree.ElementTree as ET
+from xml.dom import minidom
 
 # Official doc: https://docs.microsoft.com/en-us/sysinternals/downloads/sysmon
 
 '''
-ID 	Tag 	Event
-1 ProcessCreate 	Process Create 	
-2 FileCreateTime 	File creation time 	
-3 NetworkConnect 	Network connection detected 	
-4 n/a 	Sysmon service state change (cannot be filtered) 	
-5 ProcessTerminate 	Process terminated 	
-6 DriverLoad 	Driver Loaded 	
-7 ImageLoad 	Image loaded 	
-8 CreateRemoteThread 	CreateRemoteThread detected 	
-9 RawAccessRead 	RawAccessRead detected 	
-10 ProcessAccess 	Process accessed 	
-11 FileCreate 	File created 	
-12 RegistryEvent 	Registry object added or deleted 	
-13 RegistryEvent 	Registry value set 	
-14 RegistryEvent 	Registry object renamed 	
-15 FileCreateStreamHash 	File stream created 	
-16 n/a 	Sysmon configuration change (cannot be filtered) 	
-17 PipeEvent 	Named pipe created 	
-18 PipeEvent 	Named pipe connected 	
-19 WmiEvent 	WMI filter 	
-20 WmiEvent 	WMI consumer 	
-21 WmiEvent 	WMI consumer filter 	
-22 DNSQuery 	DNS query 	
-23 FileDelete 	File Delete
+ID 	Tag 					Event
+1 	ProcessCreate 			Process Create 	
+2 	FileCreateTime 			File creation time 	
+3 	NetworkConnect 			Network connection detected 	
+4 	n/a 					Sysmon service state change (cannot be filtered) 	
+5 	ProcessTerminate 		Process terminated 	
+6 	DriverLoad 				Driver Loaded 	
+7 	ImageLoad 				Image loaded 	
+8 	CreateRemoteThread 		CreateRemoteThread detected 	
+9 	RawAccessRead 			RawAccessRead detected 	
+10 	ProcessAccess 			Process accessed 	
+11 	FileCreate 				File created 	
+12 	RegistryEvent 			Registry object added or deleted 	
+13 	RegistryEvent 			Registry value set 	
+14 	RegistryEvent 			Registry object renamed 	
+15 	FileCreateStreamHash 	File stream created 	
+16 	n/a 					Sysmon configuration change (cannot be filtered) 	
+17 	PipeEvent 				Named pipe created 	
+18 	PipeEvent 				Named pipe connected 	
+19 	WmiEvent 				WMI filter 	
+20 	WmiEvent 				WMI consumer 	
+21 	WmiEvent 				WMI consumer filter 	
+22 	DNSQuery 				DNS query 	
+23 	FileDelete 				File Delete
 '''
 
 # ------------------
@@ -105,12 +106,15 @@ def matches_rule(r,value):
 # ------------------
 rules = {}
 tests = {}
+mt_results = {"none":[]}
 
 # Using SwiftOnSecurity's sysmon config
 # https://github.com/SwiftOnSecurity/sysmon-config/blob/master/sysmonconfig-export.xml
+# Importing Sysmon XML config
 sysmon_tree = ET.parse('sysmonconfig-export.xml')
 sysmon_root = sysmon_tree.getroot()
 
+#Importing tests to run
 tests_tree = ET.parse('tests_input.xml')
 tests_root = tests_tree.getroot()
 
@@ -158,8 +162,26 @@ for et in tests:
 				for mt in rules[et][fn]:
 					for r in rules[et][fn][mt]:
 						if matches_rule(r,v):
-							print("* {} matched {}".format(v,r))
+							#print("* {} matched {}".format(v,r))
 							tests[et][fn][i]["results"].append(mt)
-print(tests)
+							if not mt in mt_results:
+								mt_results[mt] = []
+							if not v in mt_results[mt]:
+								mt_results[mt].append({"event_type":et,"field_name":fn,"value":v})
+					if len(tests[et][fn][i]["results"]) == 0:
+						mt_results["none"].append({"event_type":et,"field_name":fn,"value":v})
 		
+#Output in XML file
+res_el = ET.Element('Results')
+for mt in mt_results:
+ 	sub_el = ET.SubElement(res_el, mt)
+ 	for entry in mt_results[mt]:
+	 	res_entry = ET.SubElement(sub_el, entry["field_name"])
+	 	res_entry.set("event_type",entry["event_type"])
+	 	res_entry.text	= entry["value"]
+tree = ET.ElementTree(res_el)
 
+#Using minidom for outputing a prettier text
+xmlstr = minidom.parseString(ET.tostring(res_el,short_empty_elements=False)).toprettyxml(indent="   ")
+with open("test_output.xml", "w") as f:
+    f.write(xmlstr)

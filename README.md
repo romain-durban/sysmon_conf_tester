@@ -11,6 +11,7 @@ The purpose of this project is to test a set of event log field values against a
 None!
 
 Script is based on the native XML parser Element Tree `xml.etree.ElementTree` which is a simple and fast implementation.
+`xml.dom.minidom` is also used to prettyfy the output file.
 
 ## Usage
 
@@ -29,7 +30,8 @@ Write your tests in the `tests_input.xml` file. Structure is similar to the Sysm
 </Tests>
 ```
 
-Matched rules will be displayed in the output.
+Results will be outputed in a XML file, sorted by match type. `none` match type is used when the value did not match any rule.
+Note that a field value can match several match types.
 
 ## Author
 
