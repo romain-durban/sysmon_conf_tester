@@ -168,8 +168,8 @@ for et in tests:
 								mt_results[mt] = []
 							if not v in mt_results[mt]:
 								mt_results[mt].append({"event_type":et,"field_name":fn,"value":v})
-					if len(tests[et][fn][i]["results"]) == 0:
-						mt_results["none"].append({"event_type":et,"field_name":fn,"value":v})
+				if len(tests[et][fn][i]["results"]) == 0:
+					mt_results["none"].append({"event_type":et,"field_name":fn,"value":v})
 		
 #Output in XML file
 res_el = ET.Element('Results')
