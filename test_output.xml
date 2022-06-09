@@ -1,10 +1,21 @@
 <?xml version="1.0" ?>
 <Results>
-   <none/>
+   <none>
+      <ProcessCreate>
+         <CommandLine>C:\WINDOWS\Microsoft.NET\Framework64\v4.0.30319\Ngen.exe args1 args2</CommandLine>
+      </ProcessCreate>
+   </none>
    <include>
-      <DestinationPort event_type="NetworkConnect">22</DestinationPort>
+      <NetworkConnect>
+         <DestinationPort>22</DestinationPort>
+      </NetworkConnect>
    </include>
    <exclude>
-      <CommandLine event_type="ProcessCreate">C:\WINDOWS\Microsoft.NET\Framework64\v4.0.30319\Ngen.exe args1 args2</CommandLine>
+      <ProcessCreate>
+         <Rule>
+            <Image>C:\Windows\System32\tasklist.exe</Image>
+            <ParentImage>C:\Program Files\McAfee\Agent\masvc.exe</ParentImage>
+         </Rule>
+      </ProcessCreate>
    </exclude>
 </Results>

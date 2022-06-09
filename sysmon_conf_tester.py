@@ -1,4 +1,4 @@
-import sys, os, re, json, logging
+import glob
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
@@ -34,6 +34,7 @@ ID 	Tag 					Event
 # ------------------
 # Global functions
 # ------------------
+# Tests if a rule matches the given value
 def matches_rule(r,value):
 	'''Possible conditions:
 		contains: 		value contains the condition
@@ -101,84 +102,174 @@ def matches_rule(r,value):
 	# by default (unknown condition), use "is"
 	return (t == value)
 
+# Evaluates if the test case matches the given rule
+def evaluateTest(rule,test):
+	'''
+	Test structure:
+		values: [
+			{"field":CommandLine,"value":"ABC"}
+			...
+		],
+		results: [...],
+		requires: {list of necessary fields}
+
+	Rule structure:
+		"operator":"or",
+		"filters":[
+			{"field":CommandLine,"condition":"is","text":"ABC"}
+			...
+		],
+		requires: {list of necessary fields}
+	'''
+	# To save some time, we run the test only if the test and the rule apply on at least 1 field in common
+	if not any(item in rule["requires"] for item in test["requires"]):
+		return False
+
+	global_result = None
+
+	for f in rule["filters"]:
+		filter_result = False
+		for v in test["values"]:
+			if v["field"] == f["field"]:
+				filter_result = filter_result or matches_rule(f,v["value"])
+		if global_result is None:
+			global_result = filter_result
+		else:
+			if rule["operator"].lower() == "or":
+				global_result = global_result or filter_result
+				if global_result:
+					return True
+			else:
+				global_result = global_result and filter_result
+				if not global_result:
+					return False
+
+	return global_result
+
 # ------------------
 # Global vars
 # ------------------
 rules = {}
 tests = {}
-mt_results = {"none":[]}
-
-# Using SwiftOnSecurity's sysmon config
-# https://github.com/SwiftOnSecurity/sysmon-config/blob/master/sysmonconfig-export.xml
-# Importing Sysmon XML config
-sysmon_tree = ET.parse('sysmonconfig-export.xml')
-sysmon_root = sysmon_tree.getroot()
-
-#Importing tests to run
-tests_tree = ET.parse('tests_input.xml')
-tests_root = tests_tree.getroot()
+mt_results = {"none":{}}
 
 # ------------------
 # Importing rules
 # ------------------
-for rg in sysmon_root.find('EventFiltering').findall('RuleGroup'):
-	for child in rg:
-		event_type = child.tag
-		match_type = child.attrib["onmatch"]
-		if not event_type in rules:
-			rules[event_type]={}
+# EventFiltering contains the definition of filters, sorted into several RuleGroup
+# We here assume RuleGroup always uses groupRelation="or" because it makes more sense
+# Using SwiftOnSecurity's sysmon config
+# https://github.com/SwiftOnSecurity/sysmon-config/blob/master/sysmonconfig-export.xml
 
-		rdic={}
-		for r in child:
-			field_name = r.tag
-			if not field_name in rules[event_type]:
-				rules[event_type][field_name] = {}
-			if not match_type in rules[event_type][field_name]:
-				rules[event_type][field_name][match_type] = []
-			rules[event_type][field_name][match_type].append({"condition":r.attrib["condition"],"text":r.text})
+configs = ['sysmonconfig-export.xml']
+# configs = glob.glob("configs_folder\\*.xml")
+
+for conf in configs:
+	# Importing Sysmon XML config
+	sysmon_tree = ET.parse(conf)
+	sysmon_root = sysmon_tree.getroot()
+	for rg in sysmon_root.find('EventFiltering').findall('RuleGroup'):
+		# At this level we expect to see (preferably) one Sysmon event type (corresponding to an EventID)
+		# With a given "onmatch" action, either include or exclude
+		for child in rg:
+			event_type = child.tag
+			match_type = child.attrib["onmatch"]
+			if not event_type in rules:
+				rules[event_type]={}
+			if not match_type in rules[event_type]:
+				rules[event_type][match_type] = []
+
+			# We want to sort filters/rules in a structure that looks like the following (to ease its use)
+			# EventType > MatchType > Filter/Rule
+			for r in child:
+				# At this point we either expect a single filter or a Rule (a combination of several filters)
+				# In either case, we buid the list of filters to apply
+				if r.tag == "Rule":
+					obj = {"operator":r.attrib["groupRelation"],"filters":[],"requires":set()}
+					for f in r:
+						field_name = f.tag
+						# Default condition is "is"
+						obj["requires"].add(field_name)
+						obj["filters"].append({"field":field_name,"condition":f.attrib["condition"] if "condition" in f.attrib else "is","text":f.text})
+					rules[event_type][match_type].append(obj)
+				else:
+					field_name = r.tag
+					# Default condition is "is"
+					rules[event_type][match_type].append({"operator":"or","requires":{field_name},"filters":[{"field":field_name,"condition":r.attrib["condition"] if "condition" in r.attrib else "is","text":r.text}]})
 
 # ------------------
 # Importing tests
 # ------------------
+#Importing test file to run
+tests_tree = ET.parse('tests_input.xml')
+tests_root = tests_tree.getroot()
+
 for et in tests_root:
 	event_type = et.tag
 	if not event_type in tests:
-		tests[event_type] = {}
+		tests[event_type] = []
 	for t in et:
 		field_name = t.tag
-		if not field_name in tests[event_type]:
-			tests[event_type][field_name] = []
-		tests[event_type][field_name].append({"value":t.text,"results":[]})
+		# Just like it is done in the Sysmon configuration
+		# We allow a test to supply multiple fields using the Rule tag
+		if field_name == "Rule":
+			values=[]
+			fields=set()
+			for f in t:
+				fields.add(f.tag)
+				values.append({"field":f.tag,"value":f.text,"results":[]})
+			tests[event_type].append({"values":values,"results":[],"requires":fields})
+		else:
+			tests[event_type].append({"values":[{"field":field_name,"value":t.text}],"results":[],"requires":{field_name}})
 
 # ------------------
 # Running tests
 # ------------------
 for et in tests:
-	for fn in tests[et]:
-		for i in range(len(tests[et][fn])):
-			t = tests[et][fn][i]
-			v = t["value"]
-			if et in rules and fn in rules[et]:
-				for mt in rules[et][fn]:
-					for r in rules[et][fn][mt]:
-						if matches_rule(r,v):
-							#print("* {} matched {}".format(v,r))
-							tests[et][fn][i]["results"].append(mt)
-							if not mt in mt_results:
-								mt_results[mt] = []
-							if not v in mt_results[mt]:
-								mt_results[mt].append({"event_type":et,"field_name":fn,"value":v})
-				if len(tests[et][fn][i]["results"]) == 0:
-					mt_results["none"].append({"event_type":et,"field_name":fn,"value":v})
+	for i in range(len(tests[et])):
+		t = tests[et][i]
+		if et in rules:
+			for mt in rules[et]:
+				for r in rules[et][mt]:
+					if evaluateTest(r,t):
+						#print("* {} matched {}".format(v,r))
+						tests[et][i]["results"].append(mt)
+						if not mt in mt_results:
+							mt_results[mt] = {}
+						if not et in mt_results[mt]:
+							mt_results[mt][et] = []
+						mt_results[mt][et].append(t)
+			if len(tests[et][i]["results"]) == 0:
+				if not et in mt_results["none"]:
+					mt_results["none"][et] = []
+				mt_results["none"][et].append(t)
+		# Missing configuration for this event type, moving to "none" directly
+		else:
+			if not et in mt_results["none"]:
+				mt_results["none"][et] = []
+			mt_results["none"][et].append(t)
 		
 #Output in XML file
 res_el = ET.Element('Results')
+# Root node
 for mt in mt_results:
- 	sub_el = ET.SubElement(res_el, mt)
- 	for entry in mt_results[mt]:
-	 	res_entry = ET.SubElement(sub_el, entry["field_name"])
-	 	res_entry.set("event_type",entry["event_type"])
-	 	res_entry.text	= entry["value"]
+	# Match Type node
+	mt_el = ET.SubElement(res_el, mt)
+	for et in mt_results[mt]:
+		# Event Type node
+		et_el = ET.SubElement(mt_el, et)
+		# Print back the test with either the value or the Rule tag containing the multiple values
+		for entry in mt_results[mt][et]:
+			if len(entry["values"]) == 1:
+				v = entry["values"][0]
+				res_entry = ET.SubElement(et_el, v["field"])
+				res_entry.text = v["value"]
+			else:
+				rule_entry = ET.SubElement(et_el, "Rule")
+				for v in entry["values"]:
+					res_entry = ET.SubElement(rule_entry, v["field"])
+					res_entry.text = v["value"]
+
 tree = ET.ElementTree(res_el)
 
 #Using minidom for outputing a prettier text

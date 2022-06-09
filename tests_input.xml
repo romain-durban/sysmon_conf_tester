@@ -4,5 +4,9 @@
 	</NetworkConnect>
 	<ProcessCreate>
 		<CommandLine>C:\WINDOWS\Microsoft.NET\Framework64\v4.0.30319\Ngen.exe args1 args2</CommandLine>
+		<Rule>
+			<Image>C:\Windows\System32\tasklist.exe</Image>
+			<ParentImage>C:\Program Files\McAfee\Agent\masvc.exe</ParentImage>
+		</Rule>
 	</ProcessCreate>
 </Tests>
