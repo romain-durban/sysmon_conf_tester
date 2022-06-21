@@ -28,8 +28,38 @@ ID 	Tag 					Event
 20 	WmiEvent 				WMI consumer 	
 21 	WmiEvent 				WMI consumer filter 	
 22 	DNSQuery 				DNS query 	
-23 	FileDelete 				File Delete
+23 	FileDelete 				File Delete archived
+24	ClipboardChange			Clipboard change (New content in the clipboard)
+25 	ProcessTampering		Process image change
+26	FileDeleteDetected		File Delete not archived
 '''
+SYSMON_EVENT_TYPES = {
+	"ProcessCreate": "1",
+	"FileCreateTime": "2",
+	"NetworkConnect": "3",
+	"ProcessTerminate": "5",
+	"DriverLoad": "6",
+	"ImageLoad": "7",
+	"CreateRemoteThread": "8",
+	"RawAccessRead": "9",
+	"ProcessAccess": "10",
+	"FileCreate": "11",
+	"RegistryEvent": "12,13,14",
+	"FileCreateStreamHash": "15",
+	"PipeEvent": "17,18",
+	"WmiEvent": "19,20,21",
+	"DNSQuery": "22",
+	"FileDelete": "23",
+	"ClipboardChange": "24",
+	"ProcessTampering": "25",
+	"FileDeleteDetected": "26"
+}
+
+SYSMON_MATCH_TYPES = {
+	"include": "Values included by the configuration",
+	"exclude": "Values excluded by the configuration",
+	"none": "No rule explictly applies to these values"
+}
 
 # ------------------
 # Global functions
@@ -52,55 +82,61 @@ def matches_rule(r,value):
 		more than:		Lexicographical comparison is more than zero
 		less than:		Lexicographical comparison is less than zero
 	'''
-	t = r["text"]
+	# Sysmon comparisons are case insensitive
+	t = r["text"].lower()
+	if isinstance(value,list):
+		low_value = [v.lower() for v in value]
+	else:
+		low_value = value.lower()
 	if "condition" in r:
 		c = r["condition"]
 	else:	# default comparison
 		c = "is"
 
 	if c == "contains":
-		return (t in value)
+		return (t in low_value)
 	if c == "excludes":
-		return (t not in value)
+		return (t not in low_value)
 	if c== "is":
-		return (t == value)
+		return (t == low_value)
 	if c == "is not":
-		return not (t == value)
+		return not (t == low_value)
 	if c == "begin with":
-		return value.startswith(t)
+		return low_value.startswith(t)
 	if c == "end with":
-		return value.endswith(t)
+		return low_value.endswith(t)
 	if c == "image":
-		return (t == value) or (t == value.split("\\")[-1])
+		return (t == low_value) or (t == low_value.split("\\")[-1])
 	mt = t.split(";")
 	res = False
 	if c == "is any":
 		for tt in mt:
-			res = res or (tt == value)
+			res = res or (tt == low_value)
 		return res
 	if c == "contains any":
 		for tt in mt:
-			res = res or (tt in value)
+			res = res or (tt in low_value)
 		return res
 	if c == "excludes any":
 		for tt in mt:
-			res = res or (tt not in value)
+			res = res or (tt not in low_value)
 		return res
 	res = True
 	if c == "contains all":
 		for tt in mt:
-			res = res and (tt in value)
+			res = res and (tt in low_value)
 		return res
 	if c == "excludes all":
 		for tt in mt:
-			res = res and (tt not in value)
+			res = res and (tt not in low_value)
 		return res
+	# For lexicographical comparisons, we keep the case intact
 	if c == "more than":
-		return (value > t)
+		return (value > r["text"])
 	if c == "less than":
-		return (value < t)
+		return (value < r["text"])
 	# by default (unknown condition), use "is"
-	return (t == value)
+	return (t == low_value)
 
 # Evaluates if the test case matches the given rule
 def evaluateTest(rule,test):
@@ -254,9 +290,11 @@ res_el = ET.Element('Results')
 # Root node
 for mt in mt_results:
 	# Match Type node
+	res_el.append(ET.Comment("Match type \"{}\" : {}".format(mt,SYSMON_MATCH_TYPES[mt]))) 
 	mt_el = ET.SubElement(res_el, mt)
 	for et in mt_results[mt]:
 		# Event Type node
+		mt_el.append(ET.Comment("Sysmon event {} - EventID {}".format(et,SYSMON_EVENT_TYPES[et]))) 
 		et_el = ET.SubElement(mt_el, et)
 		# Print back the test with either the value or the Rule tag containing the multiple values
 		for entry in mt_results[mt][et]:
